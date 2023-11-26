@@ -7,7 +7,11 @@ Created on Sun Nov 26 04:25:50 2023
 v0.3-231126 - improvements
     features:
         - info for area, cut & fill.
-        - 
+        - use command line arguments instead hardcoded
+        
+    to be improved:
+        - exception handling
+        - faster calculation (esp xy transform part)
 
 v0.2-231126 - improvements
     features:
@@ -28,6 +32,7 @@ v0.1-231126 - first version
 
 """
 
+import argparse, time
 import rasterio as rio
 from rasterio.enums import Resampling
 import numpy as np
@@ -36,8 +41,26 @@ from shapely.geometry import Point
 from shapely.geometry import box
 import geopandas as gpd
 
+start = time.time()
 
-with rio.open('SURF1X.TIF') as ras1, rio.open('SURF2XR.TIF') as ras2:
+# construct the argument parse and parse the arguments
+
+ap = argparse.ArgumentParser()
+ap.add_argument("-m", "--model", required=True,
+	help="path to model surface")
+ap.add_argument("-b", "--base", required=True,
+	help="path to extent boundary")
+ap.add_argument("-e", "--extent", required=True,
+	help="path to class raster")
+
+args = vars(ap.parse_args())
+
+modelpath = args["model"]
+basepath = args["base"]
+extentpath = args["extent"]
+
+
+with rio.open(basepath) as ras1, rio.open(modelpath) as ras2:
     x_scale = ras2.transform.a / ras1.transform.a
     y_scale = ras2.transform.e / ras1.transform.e
 
@@ -95,7 +118,7 @@ print()
 
 # Step 2: Read a shapefile using Geopandas
 # Replace with the path to your shapefile
-shapefile_path = 'TOES.shp'
+shapefile_path = extentpath
 gdf = gpd.read_file(shapefile_path)
 
 # Step 3: Check if the point is within the polygon(s) in the shapefile
@@ -118,8 +141,11 @@ cut_bnd = np.sum(diffarray_bnd[diffarray_bnd<0])*(xres*yres)
 fill_bnd = np.sum(diffarray_bnd[diffarray_bnd>=0])*(xres*yres)
 volume_bnd = np.sum(diffarray_bnd)*(xres*yres)
 
+end = time.time()
+
 print("Area of extent bound : " + str(area_bnd))
 print("Net volume  : " + str(volume_bnd))
 print("Cut volume  : " + str(cut_bnd))
 print("Fill volume : " + str(fill_bnd))
 print()
+print("Elapsed time : " + str(end - start) + " seconds")  # time in seconds
