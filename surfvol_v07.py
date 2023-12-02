@@ -12,11 +12,13 @@ Datasets:
 -m Datasets\SPHERE\SPHERE.TIF -b Datasets\SPHERE\BASE.TIF -e Datasets\SPHERE\EXTENTS.SHP -n -32767
 -m Datasets\PYRAMID\PYRAMID.TIF -b Datasets\PYRAMID\BASE.TIF -e Datasets\PYRAMID\EXTENTS.SHP -n -32767
 -m Datasets\SPILES1\SURF2XR.TIF -b Datasets\SPILES1\SURF1X.TIF -e Datasets\SPILES1\TOES.SHP -n -32767
-        
+-m Datasets//LFILL//NOVEMBER.TIF -b Datasets//LFILL//OCTOBER.TIF -e Datasets//LFILL//EXTENTS.SHP -n -32767
+
 v0.7-231129 - improvements
     features:
         - much faster calcs using custom "within" algorithm, ditching Shapely
         - 2.8 secs execution vs 25 secs using v0.4.
+        - use custom Affine transform instead of rasterio_transform for faster process
         
     todo:
         - test with various projections
@@ -81,9 +83,42 @@ import sys, os, argparse, time
 import rasterio as rio
 from rasterio.enums import Resampling
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+from matplotlib.colors import LightSource
 
 from shapely.geometry import box
 import geopandas as gpd
+
+def xy_np(a, b, c, d, e, f, x, y):
+    """
+    Apply an affine transformation to (x, y) coordinates.
+
+    Parameters:
+    a, b, c, d, e, f (float): Transformation parameters.
+    x (float or numpy array): Input x-coordinate(s).
+    y (float or numpy array): Input y-coordinate(s).
+    
+    Y is X, X is Y --> this is due to how array shape is defined in Python
+
+    Returns:
+    numpy array: Transformed (x, y) coordinates.
+    
+    """
+    
+    xaff = y
+    yaff = x
+    
+    if isinstance(x, (int, float)):
+        # If single coordinates are provided, convert them to arrays for consistency.
+        xaff = np.array([y])
+        yaff = np.array([x])
+
+    # Apply the affine transformation.
+    transformed_x = a * xaff + b * yaff + c
+    transformed_y = d * xaff + e * yaff + f
+
+    return transformed_x, transformed_y
 
 def is_point_in_polygon(point, polygon):
     """
@@ -192,13 +227,12 @@ array2 = np.ma.masked_where(array2 == nodata, array2)
 
 xres, yres = ras1.res
 
-xdim = array1.shape[0]
-ydim = array1.shape[1]
-arraybnd = np.zeros((xdim, ydim))
+xdim = array1.shape[1]
+ydim = array1.shape[0]
 
 # recreate the transformation that defines the intersection data
 intersection_transform = rio.transform.from_bounds(*intersection.bounds, 
-                                                   width=xdim, height= ydim)
+                                                   width=xdim, height=ydim)
 
 start = time.time()
 
@@ -226,10 +260,13 @@ print()
 start = time.time()
 
 # Create an array of x and y coordinates using NumPy
-x_coords, y_coords = np.meshgrid(np.arange(xdim), np.arange(ydim))
+x_coords, y_coords = np.meshgrid(np.arange(ydim), np.arange(xdim))
 
 # Apply the affine transformation to all coordinates at once using NumPy
-transformed_coords = rio.transform.xy(intersection_transform, x_coords, y_coords)
+# for now use regular affine transform until we're sure all good
+
+#transformed_coords = rio.transform.xy(intersection_transform, x_coords, y_coords)
+transformed_coords = xy_np(*intersection_transform[:6],x_coords,y_coords)
 flattened_coords = np.array(transformed_coords, dtype=np.float64).flatten(order='F')
 
 # initialize list
@@ -256,7 +293,7 @@ for polygon in gdf['geometry']:
 
 # construct boundary array of 0 and 1 from the check result
 # the 1s means it's within boundary and should be calculated
-arraybnd = np.array(pointarr).reshape([xdim, ydim]).astype(int)
+arraybnd = np.array(pointarr).reshape([ydim, xdim]).astype(int)
 diffarray_bnd = diffarray_all * arraybnd
 
 # find the total volume, cut & fill
@@ -274,3 +311,15 @@ print("Cut volume  : " + str(cut_bnd))
 print("Fill volume : " + str(fill_bnd))
 print()
 print("Elapsed time : " + str(end - start) + " seconds")  # time in seconds
+
+
+# Illuminate the scene from the northwest
+ls = LightSource(azdeg=315, altdeg=45)
+
+#plt.imshow(ls.hillshade(diffarray_bnd, vert_exag=1), cmap=mpl.colormaps['grey'])
+plt.imshow(ls.shade(diffarray_all, cmap=mpl.colormaps['jet'], vert_exag=1, blend_mode='hsv'))
+plt.show() 
+plt.imshow(ls.shade(diffarray_bnd, cmap=mpl.colormaps['jet'], vert_exag=1, blend_mode='hsv'))
+plt.show() 
+plt.imshow(arraybnd)
+plt.show() 
